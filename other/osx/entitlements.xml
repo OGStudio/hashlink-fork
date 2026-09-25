@@ -2,7 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- let a debugger attach to hl -->
     <key>com.apple.security.get-task-allow</key>
+    <true/>
+    <!-- the JIT maps its code pages with MAP_JIT, which macOS refuses to a
+         process running under the Hardened Runtime without this -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- hl dlopens .hdll files that are not signed by whoever signed hl, and
+         the Hardened Runtime otherwise requires every loaded library to carry
+         the same Team ID -->
+    <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>
 </plist>

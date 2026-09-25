@@ -41,7 +41,13 @@ STD = src/std/array.o src/std/buffer.o src/std/bytes.o src/std/cast.o src/std/da
 	src/std/socket.o src/std/string.o src/std/sys.o src/std/types.o src/std/ucs2.o src/std/thread.o src/std/process.o \
 	src/std/track.o
 
-HL_OBJ = src/code.o src/jit.o src/jit_emit.o src/jit_regs.o src/jit_x86_64.o src/jit_dump.o src/main.o src/module.o src/debugger.o src/profile.o
+ifneq (,$(filter aarch64 arm64,$(ARCH)))
+HL_JIT_BACKEND_OBJ = src/jit_aarch64.o src/jit_aarch64_emit.o
+else
+HL_JIT_BACKEND_OBJ = src/jit_x86_64.o
+endif
+
+HL_OBJ = src/code.o src/jit.o src/jit_emit.o src/jit_regs.o $(HL_JIT_BACKEND_OBJ) src/jit_dump.o src/main.o src/module.o src/debugger.o src/profile.o
 
 FMT_CPPFLAGS = -I include/mikktspace -I include/minimp3
 
@@ -168,6 +174,13 @@ BREW_PREFIX := $(shell brew --prefix)
 # prefixes for keg-only packages
 BREW_OPENAL_PREFIX := $(shell brew --prefix openal-soft)
 BREW_SDL_PREFIX := $(shell brew --prefix sdl3)
+# mbedtls is keg-only. libs/ssl/ssl.c targets the mbedtls 3.x API, so prefer the
+# mbedtls@3 keg and only fall back to the unversioned formula when it is absent.
+# brew --prefix succeeds for formulae that are merely known, so test the keg too.
+BREW_MBEDTLS_PREFIX := $(shell brew --prefix mbedtls@3 2>/dev/null)
+ifeq ($(wildcard $(BREW_MBEDTLS_PREFIX)/include/mbedtls),)
+BREW_MBEDTLS_PREFIX := $(shell brew --prefix mbedtls 2>/dev/null)
+endif
 
 CFLAGS += -arch $(ARCH)
 CPPFLAGS += -I include -I $(BREW_PREFIX)/include
@@ -186,6 +199,12 @@ sdl_LDLIBS = -lSDL3 -framework OpenGL
 openal_LDFLAGS = -L$(BREW_OPENAL_PREFIX)/lib
 openal_LDLIBS = -lopenal
 ssl_LDLIBS += -framework Security -framework CoreFoundation
+ifndef SSL_STATIC
+ifneq ($(wildcard $(BREW_MBEDTLS_PREFIX)/include/mbedtls),)
+SSL_CPPFLAGS += -I $(BREW_MBEDTLS_PREFIX)/include
+ssl_LDFLAGS += -L$(BREW_MBEDTLS_PREFIX)/lib
+endif
+endif
 RELEASE_NAME = osx
 
 # Mac native debug
@@ -242,19 +261,12 @@ LIBHL = libhl.$(LIBEXT)
 HL = hl$(EXE_SUFFIX)
 HLC = hlc$(EXE_SUFFIX)
 
-all: $(LIBHL) libs
-ifeq ($(ARCH),arm64)
-	$(warning HashLink vm is not supported on arm64, skipping)
-else
-all: $(HL)
-endif
+all: $(LIBHL) libs $(HL)
 
 install:
 	$(UNAME)==Darwin && ${MAKE} uninstall
-ifneq ($(ARCH),arm64)
 	mkdir -p $(INSTALL_BIN_DIR)
 	cp $(HL) $(INSTALL_BIN_DIR)
-endif
 	mkdir -p $(INSTALL_LIB_DIR)
 	cp *.hdll $(INSTALL_LIB_DIR)
 	cp $(LIBHL) $(INSTALL_LIB_DIR)
@@ -367,13 +379,19 @@ release_win:
 	rm -rf $(PACKAGE_NAME)
 
 release_linux release_osx:
-ifeq ($(ARCH),arm64)
-	cp $(LIBHL) *.hdll $(PACKAGE_NAME)
-else
 	cp $(HL) $(LIBHL) *.hdll $(PACKAGE_NAME)
-endif
 	tar -cvzf $(PACKAGE_NAME).tar.gz $(PACKAGE_NAME)
 	rm -rf $(PACKAGE_NAME)
+
+# Darwin only. Ad-hoc signs hl with the Hardened Runtime enabled, which is how
+# hl has to be signed when it is embedded in an application bundle. macOS
+# refuses MAP_JIT to a hardened process that does not carry
+# com.apple.security.cs.allow-jit, and the JIT has no other way to obtain
+# executable memory, so hl signed with -o runtime and no entitlements crashes
+# on the first compiled function. Deliberately not part of `all`: the plain
+# linker-signed hl that the linker produces is already allowed to use MAP_JIT.
+codesign_jit:
+	codesign -f -s - -o runtime --entitlements other/osx/entitlements.xml $(HL)
 
 codesign_osx:
 	sudo security delete-identity -c hl-cert || echo
@@ -397,6 +415,6 @@ clean_o:
 clean: clean_o
 	rm -f $(HL) $(HLC) $(LIBHL) *.hdll
 
-.PHONY: libs release
+.PHONY: libs release codesign_jit codesign_osx
 
 -include $(DEPS)

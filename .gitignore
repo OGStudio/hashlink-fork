@@ -27,6 +27,7 @@ x64
 .cache
 .vs
 /hl
+/hlc
 /include/sdl
 /include/openal
 /include/aftermath

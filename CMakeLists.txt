@@ -37,6 +37,28 @@ else()
     set(_DOWNLOAD_DEPENDENCIES OFF)
 endif()
 option(DOWNLOAD_DEPENDENCIES "Download & build third-party dependencies" ${_DOWNLOAD_DEPENDENCIES})
+
+if(APPLE AND NOT DOWNLOAD_DEPENDENCIES)
+    # Several Homebrew formulae used by the libs are keg-only, so find_* does not
+    # see them under $(brew --prefix). Add their kegs, as the Makefile does.
+    # mbedtls@3 comes before mbedtls: libs/ssl targets the mbedtls 3.x API.
+    find_program(HL_BREW brew)
+    if(HL_BREW)
+        foreach(formula mbedtls@3 mbedtls openal-soft sdl3 sqlite jpeg-turbo)
+            execute_process(
+                COMMAND ${HL_BREW} --prefix ${formula}
+                OUTPUT_VARIABLE _hl_brew_prefix
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+                RESULT_VARIABLE _hl_brew_result
+            )
+            # brew --prefix also succeeds for formulae that are not installed
+            if(_hl_brew_result EQUAL 0 AND IS_DIRECTORY "${_hl_brew_prefix}")
+                list(APPEND CMAKE_PREFIX_PATH "${_hl_brew_prefix}")
+            endif()
+        endforeach()
+    endif()
+endif()
 option(WITH_SYSTEM_PCRE2 "Link libhl against system installation of pcre2" OFF)
 
 if(MSVC)

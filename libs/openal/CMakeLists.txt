@@ -13,14 +13,16 @@ if(WIN32)
     endif()
 
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-        find_library(OPENAL_LIBRARY OpenAL32 PATHS ${INCLUDES_BASE_DIR}/openal/libs/Win64)
-        install(FILES ${INCLUDES_BASE_DIR}/openal/bin/Win64/soft_oal.dll TYPE BIN RENAME OpenAL32.dll)
+        find_library(OPENAL_LIBRARY OpenAL32 PATHS ${HL_PREBUILT_DEPS_DIR}/openal/libs/Win64)
+        install(FILES ${HL_PREBUILT_DEPS_DIR}/openal/bin/Win64/soft_oal.dll TYPE BIN RENAME OpenAL32.dll)
     else()
-        find_library(OPENAL_LIBRARY OpenAL32 PATHS ${INCLUDES_BASE_DIR}/openal/libs/Win32)
-        install(FILES ${INCLUDES_BASE_DIR}/openal/bin/Win32/soft_oal.dll TYPE BIN RENAME OpenAL32.dll)
+        find_library(OPENAL_LIBRARY OpenAL32 PATHS ${HL_PREBUILT_DEPS_DIR}/openal/libs/Win32)
+        install(FILES ${HL_PREBUILT_DEPS_DIR}/openal/bin/Win32/soft_oal.dll TYPE BIN RENAME OpenAL32.dll)
     endif()
 
-    set(OPENAL_INCLUDE_DIR ${INCLUDES_BASE_DIR}/openal/include)
+    if(NOT OPENAL_INCLUDE_DIR)
+        set(OPENAL_INCLUDE_DIR ${HL_PREBUILT_DEPS_DIR}/openal/include)
+    endif()
     add_library(OpenAL::OpenAL SHARED IMPORTED)
     set_target_properties(OpenAL::OpenAL PROPERTIES
         IMPORTED_IMPLIB ${OPENAL_LIBRARY}
@@ -47,7 +49,16 @@ elseif(DOWNLOAD_DEPENDENCIES)
     RUNTIME
 )
 else()
+    if(APPLE)
+        # Prefer openal-soft over the deprecated OpenAL.framework, as the Makefile does.
+        set(CMAKE_FIND_FRAMEWORK LAST)
+    endif()
     find_package(OpenAL REQUIRED)
+    if(APPLE AND NOT OPENAL_LIBRARY MATCHES "\\.framework")
+        target_compile_definitions(openal.hdll PRIVATE openal_soft)
+        # FindOpenAL reports <prefix>/include/AL, openal.c includes <AL/al.h>
+        target_include_directories(openal.hdll PRIVATE ${OPENAL_INCLUDE_DIR}/..)
+    endif()
 endif()
 
 set_as_hdll(openal)

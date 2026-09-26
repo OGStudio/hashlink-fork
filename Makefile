@@ -46,6 +46,8 @@ HL_JIT_BACKEND_OBJ = src/jit_aarch64.o src/jit_aarch64_emit.o
 else
 HL_JIT_BACKEND_OBJ = src/jit_x86_64.o
 endif
+# Every backend, so clean also removes objects left by a build for another ARCH.
+ALL_JIT_BACKEND_OBJ = src/jit_aarch64.o src/jit_aarch64_emit.o src/jit_x86_64.o
 
 HL_OBJ = src/code.o src/jit.o src/jit_emit.o src/jit_regs.o $(HL_JIT_BACKEND_OBJ) src/jit_dump.o src/main.o src/module.o src/debugger.o src/profile.o
 
@@ -214,7 +216,7 @@ LIB += ${HL_DEBUG}
 endif
 
 LIBHL_LDFLAGS += -install_name @rpath/libhl.dylib
-USE_LIBHL_LDFLAGS = -rpath @executable_path -rpath $(INSTALL_LIB_DIR)
+USE_LIBHL_LDFLAGS = -rpath @executable_path -rpath @executable_path/../lib -rpath $(INSTALL_LIB_DIR)
 HDLL_LDFLAGS += -install_name @rpath/$@
 else
 
@@ -228,7 +230,10 @@ CFLAGS += -m$(MARCH)
 endif
 CFLAGS += -fPIC -pthread -fno-omit-frame-pointer
 LDFLAGS += -Wl,--no-undefined
-USE_LIBHL_LDFLAGS = -Wl,-rpath,.:'$$ORIGIN':$(INSTALL_LIB_DIR)
+USE_LIBHL_LDFLAGS = -Wl,-rpath,.:'$$ORIGIN':'$$ORIGIN/../lib':$(INSTALL_LIB_DIR)
+# A soname keeps DT_NEEDED a leaf name when a program links these by path.
+LIBHL_LDFLAGS += -Wl,-soname,$(LIBHL)
+HDLL_LDFLAGS += -Wl,-soname,$@
 
 ifeq ($(MARCH),32)
 CFLAGS += -msse2 -mfpmath=sse
@@ -264,7 +269,12 @@ HLC = hlc$(EXE_SUFFIX)
 all: $(LIBHL) libs $(HL)
 
 install:
-	$(UNAME)==Darwin && ${MAKE} uninstall
+ifeq ($(UNAME),Darwin)
+# On macOS, cp over an existing Mach-O reuses its vnode, and the kernel keeps
+# the old code signature cached for it: the new binary is then killed on launch.
+# Remove the installed files first so cp creates fresh ones.
+	${MAKE} uninstall
+endif
 	mkdir -p $(INSTALL_BIN_DIR)
 	cp $(HL) $(INSTALL_BIN_DIR)
 	mkdir -p $(INSTALL_LIB_DIR)
@@ -406,7 +416,7 @@ codesign_osx:
 .SUFFIXES:
 .SUFFIXES: .cpp .c .o
 
-ALL_OBJS = ${STD} ${BOOT} ${RUNTIME} ${PCRE} ${HL_OBJ} ${FMT} ${SDL} ${SSL} ${OPENAL} ${UI} ${UV} ${MYSQL} ${SQLITE} ${HEAPS} ${HL_DEBUG}
+ALL_OBJS = ${STD} ${BOOT} ${RUNTIME} ${PCRE} ${HL_OBJ} ${ALL_JIT_BACKEND_OBJ} ${FMT} ${SDL} ${SSL} ${OPENAL} ${UI} ${UV} ${MYSQL} ${SQLITE} ${HEAPS} ${HL_DEBUG}
 DEPS = $(ALL_OBJS:.o=.d)
 
 clean_o:

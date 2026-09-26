@@ -24,7 +24,9 @@ if ((NOT WIN32) AND DOWNLOAD_DEPENDENCIES)
     FetchContent_MakeAvailable(SDL3)
 else()
     if(WIN32)
-        set(SDL3_DIR ${INCLUDES_BASE_DIR}/sdl/cmake)
+        if(NOT SDL3_DIR)
+            set(SDL3_DIR ${HL_PREBUILT_DEPS_DIR}/sdl/cmake)
+        endif()
         if(NOT MINGW)
             target_include_directories(sdl.hdll
                 PRIVATE
@@ -34,6 +36,11 @@ else()
     endif()
 
     find_package(SDL3 REQUIRED CONFIG REQUIRED COMPONENTS SDL3)
+
+    if(WIN32 AND TARGET SDL3::SDL3-shared)
+        # Ship SDL3.dll next to hl.exe so the installed tree runs on its own.
+        install(FILES $<TARGET_FILE:SDL3::SDL3-shared> TYPE BIN)
+    endif()
 endif()
 
 set_as_hdll(sdl)

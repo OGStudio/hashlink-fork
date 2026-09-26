@@ -92,23 +92,57 @@ To install under Homebrew's prefix instead:
 
     make install PREFIX=/opt/homebrew
 
-`hl` is linked with `-rpath @executable_path -rpath $(INSTALL_LIB_DIR)`, so an
-installed `hl` finds `libhl.dylib` and the `.hdll` files in
-`$(INSTALL_LIB_DIR)` from any working directory. That rpath is baked in when
-`hl` is **linked**, not when it is installed, so pass the same `PREFIX` to
-both `make` and `make install`. Building with the default prefix and then
-installing elsewhere produces an `hl` that cannot start:
+`hl` and the `.hdll` files are linked with
 
-    dyld[83852]: Library not loaded: @rpath/libhl.dylib
-      Referenced from: <...>/inst/bin/hl
-      Reason: tried: '<...>/inst/bin/libhl.dylib' (no such file),
-      '/usr/local/lib/libhl.dylib' (no such file), ...
+    -rpath @executable_path -rpath @executable_path/../lib -rpath $(INSTALL_LIB_DIR)
 
-If you have already built, `make clean` or at least `rm hl` before rebuilding
-with the new `PREFIX`, since the rpath only changes when `hl` is relinked.
+so an installed `hl` finds `libhl.dylib` and the `.hdll` files in the `lib/`
+next to its `bin/` from any working directory, and the installed tree keeps
+working when it is moved or copied elsewhere. The absolute
+`$(INSTALL_LIB_DIR)` entry is a fallback for custom `INSTALL_BIN_DIR` /
+`INSTALL_LIB_DIR` layouts; it is baked in when `hl` is **linked**, so pass the
+same `PREFIX` to `make` and `make install`, or `make clean` before rebuilding
+with a different one.
 
-`make uninstall` removes what `make install` copied, and on Darwin
-`make install` runs `uninstall` first.
+`make uninstall` removes what `make install` copied. On Darwin `make install`
+runs `uninstall` first: `cp` over an existing signed Mach-O keeps the kernel's
+cached code signature for that file, and the new binary is then killed on
+launch. On other platforms `install` overwrites in place.
+
+A build, install and clean from a clean checkout leaves no untracked or
+ignored files behind:
+
+    make -j8 PREFIX=$T && make install PREFIX=$T && make clean
+    git status --porcelain --ignored     # empty
+
+### Linking an HL/C program against an installed tree
+
+With `T` the install prefix:
+
+    cc -O2 -o out -I gen -I $T/include gen/main.c \
+       -L $T/lib -lhl $T/lib/fmt.hdll -Wl,-rpath,$T/lib
+
+The `.hdll` files have install names `@rpath/<name>.hdll`, so passing them by
+full path records a relocatable reference. Add one `.hdll` per entry of
+`"libs"` in `gen/hlc.json` (other than `std`).
+
+### CMake
+
+The CMake build produces the same layout and rpath behaviour:
+
+    cmake -S . -B <build> -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$T
+    cmake --build <build> --parallel 8
+    cmake --install <build>
+
+It compiles the AArch64 JIT backend on arm64, installs the same nine
+`.hdll` files to `$T/lib`, the headers and `hlc_main.c` to `$T/include`, and
+gives `hl` the rpaths `@executable_path;@executable_path/../lib` and every
+`.hdll` `@loader_path`. Without `DOWNLOAD_DEPENDENCIES` it adds the keg-only
+Homebrew formulae (`mbedtls@3`, `openal-soft`, `sdl3`, `sqlite`,
+`jpeg-turbo`) to `CMAKE_PREFIX_PATH` itself and links openal-soft rather
+than `OpenAL.framework`, as the `Makefile` does. The only difference is that
+`libhl` is versioned: `libhl.dylib -> libhl.2.dylib -> libhl.2.0.0.dylib`,
+and binaries record `@rpath/libhl.2.dylib`. `-lhl` works with both.
 
 ## Running .hl applications
 
@@ -120,7 +154,8 @@ with the new `PREFIX`, since the rpath only changes when `hl` is relinked.
 - in the current working directory;
 - next to the `hl` executable;
 - in any directory on `DYLD_LIBRARY_PATH`;
-- in `$(INSTALL_LIB_DIR)` after `make install`.
+- in the rpath directories of `hl` (the `lib/` beside its `bin/`, and
+  `$(INSTALL_LIB_DIR)`) after `make install`.
 
 When none of those has it:
 
@@ -312,7 +347,8 @@ pass on this backend; how they were run is recorded in
   architecture; its windows, buttons and dialogs do nothing. This is not
   arm64 specific.
 - **`heaps.hdll` is not exercised at runtime** here, only built and linked.
-- **The CMake build is not covered.** Only the `Makefile` path was verified.
+- **The CMake build is covered only for build, install and running `hl`**,
+  not by the library test programs.
 - **`make ARCH=x86_64` is not usable for the `.hdll` files** on a Homebrew
   arm64 installation, because the dependencies are arm64 only.
 - **Hot reload (`hl --hot-reload`)** is not implemented by the new JIT on

@@ -1,4 +1,8 @@
 set(INCLUDES_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+# Windows only: where the prebuilt SDL3 VC devel package (sdl/), the
+# openal-soft binary package (openal/) and the ffmpeg SDK (ffmpeg/) are
+# unpacked. Defaults to include/, which is where the CI unpacks them.
+set(HL_PREBUILT_DEPS_DIR "${INCLUDES_BASE_DIR}" CACHE PATH "Directory holding the prebuilt Windows packages sdl/, openal/, ffmpeg/")
 
 if (BUILD_SHARED_LIBS)
     set(HDLL_SUFFIX .hdll)
@@ -71,6 +75,18 @@ endif()
 option(WITH_SDL "Build sdl.hdll." ON)
 if(WITH_SDL)
     add_subdirectory(sdl)
+endif()
+
+# Built by the Makefile on every platform; off on Windows until the CMake
+# build of it has been verified there (hl.sln builds it with MSBuild).
+if(WIN32)
+    set(_WITH_MYSQL_DEFAULT OFF)
+else()
+    set(_WITH_MYSQL_DEFAULT ON)
+endif()
+option(WITH_MYSQL "Build mysql.hdll." ${_WITH_MYSQL_DEFAULT})
+if(WITH_MYSQL)
+    add_subdirectory(mysql)
 endif()
 
 option(WITH_SQLITE "Build sqlite.hdll." ON)

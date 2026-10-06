@@ -284,10 +284,12 @@ static LARGE_INTEGER driver_version = {0};
 typedef ID3D12Device2 dx_device;
 typedef IDXGIFactory dx_factory;
 typedef IDXGIAdapter dx_adapter;
+typedef IDXGISwapChain dx_swapchain;
 
 #define _DEVICE _ABSTRACT(dx_device)
 #define _FACTORY _ABSTRACT(dx_factory)
 #define _ADAPTER _ABSTRACT(dx_adapter)
+#define _SWAPCHAIN _ABSTRACT(dx_swapchain)
 
 HL_PRIM ID3D12Device* HL_NAME(get_device)() {
 	dx_driver* drv = static_driver;
@@ -320,11 +322,19 @@ HL_PRIM void HL_NAME(set_factory)(IDXGIFactory* factory) {
 #endif
 }
 
+HL_PRIM void HL_NAME(set_swap_chain)(IDXGISwapChain* swapchain) {
+#ifndef HL_XBS
+	dx_driver* drv = static_driver;
+	drv->swapchain = static_cast<IDXGISwapChain4*>(swapchain);
+#endif
+}
+
 DEFINE_PRIM(_DEVICE, get_device, _NO_ARG);
 DEFINE_PRIM(_FACTORY, get_factory, _NO_ARG);
 DEFINE_PRIM(_ADAPTER, get_adapter, _NO_ARG);
 DEFINE_PRIM(_VOID, set_device, _DEVICE);
 DEFINE_PRIM(_VOID, set_factory, _FACTORY);
+DEFINE_PRIM(_VOID, set_swap_chain, _SWAPCHAIN);
 
 HL_PRIM void dx12_flush_messages();
 
@@ -787,6 +797,25 @@ HL_PRIM ID3D12Resource *HL_NAME(create_committed_resource)( D3D12_HEAP_PROPERTIE
 	return res;
 }
 
+HL_PRIM ID3D12Heap *HL_NAME(create_heap)( D3D12_HEAP_DESC *desc ) {
+	ID3D12Heap *heap = NULL;
+	DXERR(static_driver->device->CreateHeap(desc, IID_PPV_ARGS(&heap)));
+	return heap;
+}
+
+HL_PRIM ID3D12Resource *HL_NAME(create_placed_resource)( ID3D12Heap *heap, int64 offset, D3D12_RESOURCE_DESC *desc, D3D12_RESOURCE_STATES initialState, D3D12_CLEAR_VALUE *clearValue ) {
+	ID3D12Resource *res = NULL;
+#ifdef HL_XBS
+	initialState = (D3D12_RESOURCE_STATES)(initialState & ~D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+#endif
+	DXERR(static_driver->device->CreatePlacedResource(heap, (UINT64)offset, desc, initialState, clearValue, IID_PPV_ARGS(&res)));
+	return res;
+}
+
+HL_PRIM void HL_NAME(get_resource_allocation_info)( D3D12_RESOURCE_DESC *desc, D3D12_RESOURCE_ALLOCATION_INFO *info ) {
+	*info = static_driver->device->GetResourceAllocationInfo(0, 1, desc);
+}
+
 HL_PRIM void HL_NAME(create_render_target_view)( ID3D12Resource *res, D3D12_RENDER_TARGET_VIEW_DESC *desc, D3D12_CPU_DESCRIPTOR_HANDLE descriptor ) {
 	static_driver->device->CreateRenderTargetView(res,desc,descriptor);
 }
@@ -865,6 +894,9 @@ DEFINE_PRIM(_VOID, create_constant_buffer_view, _STRUCT _I64);
 DEFINE_PRIM(_VOID, create_unordered_access_view, _RES _RES _STRUCT _I64);
 DEFINE_PRIM(_VOID, create_sampler, _STRUCT _I64);
 DEFINE_PRIM(_RES, create_committed_resource, _STRUCT _I32 _STRUCT _I32 _STRUCT);
+DEFINE_PRIM(_RES, create_heap, _STRUCT);
+DEFINE_PRIM(_RES, create_placed_resource, _RES _I64 _STRUCT _I32 _STRUCT);
+DEFINE_PRIM(_VOID, get_resource_allocation_info, _STRUCT _STRUCT);
 DEFINE_PRIM(_RES, get_back_buffer, _I32);
 DEFINE_PRIM(_VOID, resource_release, _RES);
 DEFINE_PRIM(_VOID, resource_set_name, _RES _BYTES);
@@ -913,7 +945,9 @@ HL_PRIM vbyte *HL_NAME(compiler_compile)( dx_compiler *comp, uchar *source, ucha
 	if( blob == NULL )
 		hl_error("Could not create blob");
 #ifndef HL_XBS
+	hl_blocking(true);
 	comp->compiler->Compile(blob,L"",L"main",profile,hl_aptr(args,LPCWSTR),args->size,NULL,0,NULL,&result);
+	hl_blocking(false);
 #else
 	BOOL knownEncoding = FALSE;
 	UINT32 encoding = 0U;
@@ -970,7 +1004,10 @@ HL_PRIM ID3D12PipelineState *HL_NAME(create_graphics_pipeline_state)( D3D12_GRAP
 		static_driver->gpuCrashTracker->OnCreateGraphicsPipeline(desc);
 	ID3D12PipelineState *state = NULL;
 	// if shader is considered invalid, maybe you're missing dxil.dll
-	DXERR(static_driver->device->CreateGraphicsPipelineState(desc,IID_PPV_ARGS(&state)));
+	hl_blocking(true);
+	HRESULT hr = static_driver->device->CreateGraphicsPipelineState(desc,IID_PPV_ARGS(&state));
+	hl_blocking(false);
+	DXERR(hr);
 	return state;
 }
 
